@@ -2,6 +2,7 @@ import os
 import threading
 import customtkinter as ctk
 import pygame
+import sv_ttk
 
 from tkinter import simpledialog
 from pydub import AudioSegment
@@ -29,7 +30,7 @@ class SoundboardApp:
 
         # Left panel (all tracks)
         self.left_panel = ctk.CTkFrame(self.top_frame, corner_radius=8)
-        self.left_panel.pack(side="left", fill="both", expand=True, padx=(0, 5), pady=10)
+        self.left_panel.pack(side="left", fill="both", expand=True, padx=(0, 0), pady=10)
 
         # Label for left panel
         self.left_label = ctk.CTkLabel(self.left_panel, text="All Tracks", font=("Arial", 14, "bold"))
@@ -41,7 +42,7 @@ class SoundboardApp:
 
         # Right panel (selected tracks)
         self.right_panel = ctk.CTkFrame(self.top_frame, corner_radius=8)
-        self.right_panel.pack(side="right", fill="both", expand=True, padx=(5, 0), pady=10)
+        self.right_panel.pack(side="right", fill="both", expand=True, padx=(0, 0), pady=10)
 
         # Label for right panel
         self.right_label = ctk.CTkLabel(self.right_panel, text="Selected Tracks", font=("Arial", 14, "bold"))
@@ -60,9 +61,9 @@ class SoundboardApp:
             self.bottom_frame,
             text="Download Track",
             command=self.download_track,
-            corner_radius=8,
-            fg_color="#1f6aa5",
-            hover_color="#144870",
+            corner_radius=6,
+            fg_color="#2a2a2a",
+            hover_color="#24525B",
             height=36
         )
         self.download_button.pack(side="left", padx=5, pady=5, expand=True, fill="x")
@@ -71,9 +72,9 @@ class SoundboardApp:
             self.bottom_frame,
             text="Stop",
             command=self.stop_playback,
-            corner_radius=8,
-            fg_color="#d35347",
-            hover_color="#a53a2d",
+            corner_radius=6,
+            fg_color="#2a2a2a",
+            hover_color="#24525B",
             height=36
         )
         self.stop_button.pack(side="left", padx=5, pady=5, expand=True, fill="x")
@@ -94,9 +95,9 @@ class SoundboardApp:
             from_=0,
             to=100,
             command=self.set_volume,
-            progress_color="#1f6aa5",
-            button_color="#1f6aa5",
-            button_hover_color="#144870",
+            progress_color="#327380",
+            button_color="#24525B",
+            button_hover_color="#327380",
             width=400
         )
         self.volume_slider.pack(side="left", fill="x", expand=True)
@@ -148,32 +149,6 @@ class SoundboardApp:
             track_label.bind("<Double-Button-1>", lambda event, t=track: self.play_track(t[2]))
             # Bind right-click to delete the track
             track_label.bind("<Button-3>", lambda event, w=track_label: w.destroy())
-
-    # def download_track(self):
-    #     url = simpledialog.askstring("Download Track", "Enter YouTube URL:")
-    #     if url:
-    #         try:
-    #             # Download the audio file
-    #             file_path = download_audio(url)
-    #
-    #             # Convert the downloaded file to WAV
-    #             sound = AudioSegment.from_file(file_path, format="webm")
-    #             wav_path = file_path.replace('.webm', '.wav')
-    #             sound.export(wav_path, format="wav")
-    #
-    #             # Remove the original .webm file
-    #             os.remove(file_path)
-    #
-    #             # Add the track to the database with the new .wav path
-    #             track_name = os.path.splitext(os.path.basename(wav_path))[0]
-    #             add_track(track_name, wav_path)
-    #
-    #             # Reload the tracks
-    #             self.load_tracks()
-    #         except Exception as e:
-    #             print(f"Error downloading track: {e}")
-
-    import threading
 
     def download_track(self):
         url = simpledialog.askstring("Download Track", "Enter YouTube URL:")
@@ -236,4 +211,6 @@ class SoundboardApp:
 if __name__ == "__main__":
     root = ctk.CTk()
     app = SoundboardApp(root)
+    sv_ttk.set_theme("dark")
+
     root.mainloop()
