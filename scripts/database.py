@@ -11,10 +11,8 @@ def execute_query(query: str, params: Tuple = (), commit: bool = True, fetch: bo
 
         if commit:
             conn.commit()
-
         if fetch:
             return cursor.fetchall()
-
         return None
     finally:
         conn.close()
