@@ -1,30 +1,37 @@
 import os
 import threading
 import customtkinter as ctk
-import pygame
 
 from tkinter import simpledialog
 from pydub import AudioSegment
 
-from scripts.database import init_db, get_all_tracks, add_track, get_selected_tracks, save_selected_tracks, \
-    get_track_path_from_selected_track_id
-from scripts.audio_handler import download_audio
+from scripts.audio_player import AudioPlayer
+from scripts.database import init_db, get_all_tracks, add_track, get_selected_tracks, save_selected_tracks
+
+from scripts.audio_download import download_audio
 from scripts.track_component import TrackComponent
 
-
 class Soundboard:
-    def __init__(self, self_root):
-        self.root = self_root
+    def __init__(self, root):
+        self.root = root
         self.root.title("SOUNdbOARD")
-        self.root.geometry("800x540")
-        pygame.mixer.init()
+        self.root.geometry("840x540")
+
         init_db()
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("dark-blue")
         self.volume = 0.3
+        self.player = AudioPlayer()
 
+        self.build_ui()
+
+        # Load tracks on startup
+        self.load_tracks()
+        self.load_selected_tracks()
+
+    def build_ui(self):
         # Main frame
-        self.main_frame = ctk.CTkFrame(self_root, corner_radius=0)
+        self.main_frame = ctk.CTkFrame(self.root, corner_radius=0)
         self.main_frame.pack(pady=0, padx=0, fill="both", expand=True)
 
         # Top frame for left and right panels
@@ -71,17 +78,6 @@ class Soundboard:
         )
         self.download_button.pack(side="left", padx=5, pady=5, expand=True, fill="x")
 
-        self.stop_button = ctk.CTkButton(
-            self.bottom_frame,
-            text="Stop",
-            command=self.stop_playback,
-            corner_radius=6,
-            fg_color="#2a2a2a",
-            hover_color="#327380",
-            height=36
-        )
-        self.stop_button.pack(side="left", padx=5, pady=5, expand=True, fill="x")
-
         # Volume control
         self.volume_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.volume_frame.pack(pady=10, padx=10, fill="x")
@@ -106,18 +102,11 @@ class Soundboard:
         self.volume_slider.pack(side="left", fill="x", expand=True)
         self.volume_slider.set(30)
 
-        # Load tracks on startup
-        self.load_tracks()
-        self.load_selected_tracks()
-        self.currently_playing_id = None
-
     def load_tracks(self):
-        # Clear existing tracks
         for widget in self.all_tracks_frame.winfo_children():
             widget.destroy()
 
-        tracks = get_all_tracks()
-        for track in tracks:
+        for track in get_all_tracks():
             track_label = ctk.CTkLabel(
                 self.all_tracks_frame,
                 text=track[1],
@@ -130,149 +119,81 @@ class Soundboard:
             )
             track_label.pack(fill="x", pady=2, padx=5)
             track_label.track = track
-            # Bind click event to add the track to the selected panel
             track_label.bind("<Button-1>", lambda event, t=track: self.on_track_click(t))
 
-    def load_selected_tracks(self):
-        # Clear existing selected tracks
-        for widget in self.selected_tracks_frame.winfo_children():
-            widget.destroy()
-
-        # Load selected tracks from the database
-        selected_tracks = get_selected_tracks()
-
-        for track in selected_tracks:
-            track_component = TrackComponent(
-                self.selected_tracks_frame,
-                (track[0], track[1], track[2], track[3], track[4], track[5], track[6]),
-                self.play_track,
-                self.stop_playback,
-                width=280,
-                height=60
-            )
-            track_component.pack(fill="x", pady=5, padx=5)
-
-    def on_track_click(self, track):
-        # Check if the track is already in the selected panel
-        for widget in self.selected_tracks_frame.winfo_children():
-            if isinstance(widget, TrackComponent) and widget.selected_track_id == track[0]:
-                return
-
+    def add_selected_track(self, track):
         track_component = TrackComponent(
             self.selected_tracks_frame,
             track,
-            self.play_track,
-            self.stop_playback,
+            self,
+            self.player,
             width=280,
             height=60
         )
         track_component.pack(fill="x", pady=5, padx=5)
+
+    def load_selected_tracks(self):
+        for widget in self.selected_tracks_frame.winfo_children():
+            widget.destroy()
+
+        for track in get_selected_tracks():
+            self.add_selected_track(track)
+
+    # ----------------------------- Track Management -----------------------------
+
+    def on_track_click(self, track):
+        for widget in self.selected_tracks_frame.winfo_children():
+            if isinstance(widget, TrackComponent) and widget.selected_track_id == track[0]:
+                return
+
+        self.add_selected_track(track)
         self.save_selected_tracks()
 
     def save_selected_tracks(self):
-        track_components = []
+        selected_track_ids = []
 
         for widget in self.selected_tracks_frame.winfo_children():
             if isinstance(widget, TrackComponent):
-                track_components.append(widget)
+                selected_track_ids.append(widget.selected_track_id)
 
-        ordered_track_ids = [component.track_id for component in track_components]
-        save_selected_tracks(ordered_track_ids)
+        save_selected_tracks(selected_track_ids)
+
+    # ----------------------------- Downloading -----------------------------
 
     def download_track(self):
         url = simpledialog.askstring("Download Track", "Enter YouTube URL:")
-        if url:
-            # Disable the download button to prevent multiple downloads
-            self.download_button.configure(state="disabled")
+        if not url:
+            return
 
-            # Start a new thread for downloading and converting the track
-            download_thread = threading.Thread(target=self.download_and_convert, args=(url,))
-            download_thread.start()
+        self.download_button.configure(state="disabled")
+        threading.Thread(target=self.download_and_convert, args=(url,)).start()
 
     def download_and_convert(self, url):
         try:
-            # Download the audio file
             file_path = download_audio(url)
-
-            # Convert the downloaded file to WAV
             sound = AudioSegment.from_file(file_path, format="webm")
             wav_path = file_path.replace('.webm', '.wav')
             sound.export(wav_path, format="wav")
             duration = len(sound) / 1000
-
-            # Remove the original .webm file
             os.remove(file_path)
 
-            # Add the track to the database with the new .wav path
             track_name = os.path.splitext(os.path.basename(wav_path))[0]
             add_track(track_name, wav_path, duration=duration)
-
-            # Reload the tracks on the main thread
             self.root.after(0, self.load_tracks)
         except Exception as e:
             print(f"Error downloading track: {e}")
         finally:
-            # Re-enable the download button on the main thread
             self.root.after(0, lambda: self.download_button.configure(state="normal"))
 
-    def play_track(self, selected_track_id):
-        path = get_track_path_from_selected_track_id(selected_track_id)[0][0]
-        if not os.path.exists(path):
-            print(f"Error: File not found at {path}")
-            return
-        try:
-            print("currently playing")
-            # Check if this track is already playing
-            if self.currently_playing_id == selected_track_id:
-                if pygame.mixer.music.get_busy():
-                    pygame.mixer.music.pause()
-                    return
-                else:
-                    pygame.mixer.music.unpause()
-                    return
+    # ----------------------------- Playback Control -----------------------------
 
-            # Stop any currently playing sound
-            if self.currently_playing_id:
-                pygame.mixer.music.stop()
-
-            # Load the audio file directly with pygame.mixer.music
-            pygame.mixer.music.load(path)
-            pygame.mixer.music.set_volume(self.volume)
-            pygame.mixer.music.play()
-            self.currently_playing_id = selected_track_id
-
-            # Update all track components to show play button
-            for widget in self.selected_tracks_frame.winfo_children():
-                if isinstance(widget, TrackComponent):
-                    widget.is_playing = (widget.selected_track_id == self.currently_playing_id)
-                    widget.play_button.configure(text="⏸" if widget.is_playing else "▶")
-                if widget.is_playing:
-                    widget.update_progress(self.currently_playing_id)
-                else:
-                    # Stop progress updates for other tracks
-                    if widget.update_id is not None:
-                        widget.after_cancel(widget.update_id)
-                        widget.update_id = None
-
-        except Exception as e:
-            print(f"Error playing track: {e}")
-            import traceback
-            traceback.print_exc()
-
-    def stop_playback(self):
-        pygame.mixer.music.pause()
-        #self.currently_playing_id = None
-
-        # Update all track components to show play button
+    def track_started(self, active_component):
         for widget in self.selected_tracks_frame.winfo_children():
-            if isinstance(widget, TrackComponent):
-                widget.is_playing = False
-                widget.play_button.configure(text="▶")
-
-                # Stop progress updates
-                if widget.update_id is not None:
-                    widget.after_cancel(widget.update_id)
-                    widget.update_id = None
+            if isinstance(widget, TrackComponent) and widget is not active_component:
+                widget.pause() # type: ignore[attr-defined]
 
     def set_volume(self, volume):
         self.volume = float(volume) / 100
+        for widget in self.selected_tracks_frame.winfo_children():
+            if isinstance(widget, TrackComponent):
+                self.player.set_volume(widget.selected_track_id, self.volume)
