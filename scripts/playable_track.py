@@ -1,32 +1,56 @@
 import customtkinter as ctk
 
-class TrackComponent(ctk.CTkFrame):
-    def __init__(self, master, track, soundboard, player, **kwargs):
+from scripts.database import remove_selected_track
+
+
+class PlayableTrack(ctk.CTkFrame):
+    def __init__(self, master, track, panel, soundboard, player, **kwargs):
         super().__init__(master, **kwargs)
 
-        self.selected_track_id = track[6]
-        self.track_name = track[1]
-        self.track_path = track[2]
-        self.tags = track[3] # need a use for this
-        self.duration = int(track[4])
-        self.soundboard = soundboard
+        self.track = track
+        self.panel = panel
         self.player = player
+        self.soundboard = soundboard
 
         self.is_playing = False
         self.is_paused = 0
         self.update_job = None
+        self.pending_seek = 0
 
         self.configure(fg_color="#2a2a2a", corner_radius=6)
         self.build_ui()
 
     def build_ui(self):
-        # Track name label
-        self.track_label = ctk.CTkLabel(self, text=self.track_name, text_color="white", anchor="w")
-        self.track_label.pack(fill="x", padx=10, pady=(10, 0))
+        # Header
+        self.header_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.header_frame.pack(fill="x", padx=10, pady=(0, 0))
+
+        # Delete button
+        self.delete_button = ctk.CTkButton(
+            self.header_frame,
+            text="✕",
+            width=20,
+            height=20,
+            fg_color="transparent",
+            hover_color="#5a5a5a",
+            text_color="gray",
+            corner_radius=5,
+            command=self.remove_self
+        )
+        self.delete_button.pack(side="right")
 
         # Progress bar and play button frame
         self.progress_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.progress_frame.pack(fill="x", padx=10, pady=(0, 10))
+
+        # Track name label
+        self.track_label = ctk.CTkLabel(
+            self.header_frame,
+            text=self.track.title,
+            text_color="white",
+            anchor="w"
+        )
+        self.track_label.pack(side = "left", fill="x", expand=True)
 
         # Play button
         self.play_button = ctk.CTkButton(
@@ -70,7 +94,7 @@ class TrackComponent(ctk.CTkFrame):
         # Duration label
         self.duration_label = ctk.CTkLabel(
             self.progress_frame,
-            text=f"{self.duration//60:02d}:{self.duration%60:02d}",
+            text=f"{int(self.track.duration)//60:02d}:{int(self.track.duration)%60:02d}",
             text_color="white",
             width=40
         )
@@ -102,13 +126,14 @@ class TrackComponent(ctk.CTkFrame):
 
     def toggle_play(self):
         if not self.is_playing or self.is_paused:
-            self.soundboard.track_started(self)  # pause others
             self.play()
+            self.panel.track_started(self)
         else:
             self.pause()
 
     def play(self):
-        self.player.play(self.selected_track_id, self.track_path, self.soundboard.volume)
+        self.player.play(self.track.id, self.track.file_path,
+                         (self.panel.panel_volume / 100) * self.soundboard.volume)
         self.is_playing = True
         self.is_paused = False
         self.play_button.configure(text="⏸")
@@ -118,7 +143,7 @@ class TrackComponent(ctk.CTkFrame):
         if not self.is_playing:
             return
 
-        self.player.pause(self.selected_track_id)
+        self.player.pause(self.track.id)
         self.is_playing = False
         self.is_paused = True
         self.play_button.configure(text="▶")
@@ -127,7 +152,7 @@ class TrackComponent(ctk.CTkFrame):
             self.update_job = None
 
     def stop(self):
-        self.player.stop(self.selected_track_id)
+        self.player.stop(self.track.id)
         self.is_playing = False
         self.is_paused = False
         self.play_button.configure(text="▶")
@@ -140,7 +165,7 @@ class TrackComponent(ctk.CTkFrame):
     def remove_self(self):
         self.stop()
         self.destroy()
-        self.soundboard.save_selected_tracks()
+        remove_selected_track(self.track.id)
 
     def on_hover(self, event):
         self.configure(fg_color="#3a3a3a")
@@ -148,28 +173,39 @@ class TrackComponent(ctk.CTkFrame):
     def on_leave(self, event):
         self.configure(fg_color="#2a2a2a")
 
-    # ------------------------------------------------------------
-    # Progress / Time updates
-    # ------------------------------------------------------------
+    # ----------------------- Progress / Time updates -------------------------------
 
-    def update_progress(self, value=None):
+    def update_progress(self):
         if not self.is_playing:
             return
 
-        position_ms = self.player.get_position(self.selected_track_id)
-        duration_ms = self.duration * 1000 or 1
+        position_ms = 0
+        if self.pending_seek != 0:
+            position_ms = self.pending_seek
+            self.pending_seek = 0
+            self.player.seek(self.track.id, position_ms)
+        else:
+            position_ms = self.player.get_position(self.track.id)
 
-        progress = (position_ms / duration_ms) * 100
-        self.progress_bar.set(progress)
-        self.time_label.configure(text=self.format_time(position_ms))
-
+        self.set_progress(position_ms)
         self.update_job = self.after(250, self.update_progress)
 
     def on_seek(self, slider_value):
-        if self.duration <= 0:
+        if self.track.duration <= 0:
             return
-        new_time_ms = (slider_value / 100) * (self.duration * 1000)
-        self.player.seek(self.selected_track_id, new_time_ms)
+        new_time_ms = (slider_value / 100) * (self.track.duration * 1000)
+        self.set_progress(new_time_ms)
+        self.player.seek(self.track.id, new_time_ms)
+        if not self.is_playing:
+            self.pending_seek = new_time_ms
+
+    def set_progress(self, position_ms):
+        self.time_label.configure(text=self.format_time(position_ms))
+        duration_ms = self.track.duration * 1000 or 1
+
+        progress = (position_ms / duration_ms) * 100
+        self.progress_bar.set(progress)
+
 
     @staticmethod
     def format_time(ms):
