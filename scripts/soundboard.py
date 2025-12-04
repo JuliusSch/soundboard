@@ -77,11 +77,12 @@ class Soundboard:
         self.download_button = ctk.CTkButton(
             self.bottom_frame,
             text="⤓",
-            font=("Arial", 20, "bold"),
+            font=("Segoe UI Emoji", 20, "bold"),
             command=self.download_track,
             corner_radius=6,
             fg_color="#2a2a2a",
             hover_color="#327380",
+            width=36,
             height=36
         )
         self.download_button.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
@@ -89,11 +90,12 @@ class Soundboard:
         self.add_panel_button = ctk.CTkButton(
             self.bottom_frame,
             text="＋",
-            font=("Arial", 20, "bold"),
+            font=("Segoe UI Emoji", 20, "bold"),
             command=self.open_panel_dialog,
             corner_radius=6,
             fg_color="#2a2a2a",
             hover_color="#327380",
+            width=36,
             height=36
         )
         self.add_panel_button.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
