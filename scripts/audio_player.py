@@ -4,17 +4,27 @@ import soundfile as sf
 import numpy as np
 import os
 
+
 BLOCKSIZE = 1024
 CHANNELS = 2
 SR = 44100
+FADE_TIME_SECONDS = 0.25
+
 
 class Track:
     def __init__(self, path, volume=1.0, loop=False):
         self.path = path
-        self.volume = volume
+        self.base_volume = float(volume)
+        self.current_volume = 0.0
+        self.target_volume = self.base_volume
         self.loop = loop
+
         self.lock = threading.Lock()
         self.is_playing = False
+
+        # Fade state
+        self.fade_samples_remaining = 0
+        self.pending_action = None
 
         # Open audio file
         self.sf = sf.SoundFile(path)
@@ -22,33 +32,73 @@ class Track:
         self.channels = self.sf.channels
         self.sr = self.sf.samplerate
 
-        self.position = 0  # current frame
+        self.position = 0
         self.stopped = False
+
+    def _apply_fade_and_volume(self, data):
+        if data.size == 0:
+            return data
+
+        n = data.shape[0]
+
+        if self.fade_samples_remaining > 0:
+            n_fade = min(self.fade_samples_remaining, n)
+
+            step = (self.target_volume - self.current_volume) / self.fade_samples_remaining
+
+            gains = self.current_volume + step * np.arange(1, n_fade + 1, dtype=np.float32)
+            data[:n_fade] *= gains[:, None]
+
+            self.current_volume = float(gains[-1])
+            self.fade_samples_remaining -= n_fade
+
+            if n > n_fade:
+                data[n_fade:] *= self.current_volume
+
+            if self.fade_samples_remaining == 0:
+                if self.pending_action == "pause" and self.target_volume == 0.0:
+                    # We've faded out fully -> actually pause
+                    self.is_playing = False
+                self.pending_action = None
+        else:
+            data *= self.current_volume
+
+        return data
 
     def read_block(self, blocksize=BLOCKSIZE):
         with self.lock:
-            if not self.is_playing or self.stopped:
+            if self.stopped:
                 return np.zeros((blocksize, CHANNELS), dtype=np.float32)
 
-            # Looping logic
+            if not self.is_playing and self.fade_samples_remaining == 0:
+                return np.zeros((blocksize, CHANNELS), dtype=np.float32)
+
             if self.position >= self.frames:
                 if self.loop:
                     self.position = 0
                 else:
                     self.is_playing = False
+                    self.current_volume = 0.0
+                    self.fade_samples_remaining = 0
+                    self.pending_action = None
                     return np.zeros((blocksize, CHANNELS), dtype=np.float32)
 
             self.sf.seek(self.position)
             data = self.sf.read(blocksize, dtype='float32', always_2d=True)
             self.position += len(data)
 
-            # Convert channels if needed
             if data.shape[1] < CHANNELS:
                 data = np.repeat(data, CHANNELS, axis=1)
             elif data.shape[1] > CHANNELS:
                 data = data[:, :CHANNELS]
 
-            return data * self.volume
+            data = self._apply_fade_and_volume(data)
+
+            if len(data) < blocksize:
+                pad = np.zeros((blocksize - len(data), CHANNELS), dtype=np.float32)
+                data = np.vstack((data, pad))
+
+            return data
 
     def seek(self, frame):
         with self.lock:
@@ -56,20 +106,63 @@ class Track:
 
     def set_volume(self, volume):
         with self.lock:
-            self.volume = volume
+            self.base_volume = float(volume)
+            # If no fade is happening, snap both current & target
+            if self.fade_samples_remaining == 0:
+                self.current_volume = self.base_volume
+                self.target_volume = self.base_volume
+            else:
+                # Fade will continue towards the new target volume
+                self.target_volume = self.base_volume
 
-    def pause(self):
+    def pause(self, do_fade):
         with self.lock:
-            self.is_playing = False
+            if do_fade and self.is_playing:
+                # Start fade-out to 0, then pause when done
+                self.target_volume = 0.0
+                if self.current_volume <= 0.0:
+                    # Already silent, just pause
+                    self.is_playing = False
+                    self.fade_samples_remaining = 0
+                    self.pending_action = None
+                else:
+                    self.fade_samples_remaining = int(FADE_TIME_SECONDS * self.sr)
+                    if self.fade_samples_remaining <= 0:
+                        self.is_playing = False
+                        self.current_volume = 0.0
+                    else:
+                        self.pending_action = "pause"
+            else:
+                self.is_playing = False
+                self.fade_samples_remaining = 0
+                self.pending_action = None
 
-    def resume(self):
+    def resume(self, do_fade):
         with self.lock:
+            self.stopped = False
             self.is_playing = True
+            self.pending_action = None
+
+            if do_fade:
+                self.target_volume = self.base_volume
+                self.fade_samples_remaining = int(FADE_TIME_SECONDS * self.sr)
+                if self.fade_samples_remaining <= 0:
+                    self.current_volume = self.base_volume
+                    self.fade_samples_remaining = 0
+                else:
+                    self.current_volume = 0.0
+            else:
+                self.fade_samples_remaining = 0
+                self.current_volume = self.base_volume
+                self.target_volume = self.base_volume
 
     def stop(self):
         with self.lock:
             self.is_playing = False
             self.stopped = True
+            self.fade_samples_remaining = 0
+            self.pending_action = None
+            self.current_volume = 0.0
             self.sf.close()
 
 
@@ -102,31 +195,32 @@ class AudioPlayer:
         outdata[:] = mix
 
     # === Playback API ===
-    def play(self, track_id, path, volume=1.0, loop=False):
+
+    def play(self, track_id, path, volume=1.0, do_loop=False, do_fade=False):
         with self.lock:
             if track_id in self.tracks:
                 track = self.tracks[track_id]
-                track.resume()
                 track.set_volume(volume)
-                track.loop = loop
+                track.loop = do_loop
+                track.resume(do_fade)
             else:
                 if not os.path.exists(path):
                     raise FileNotFoundError(f"Audio file not found: {path}")
-                track = Track(path, volume=volume, loop=loop)
-                track.resume()
+                track = Track(path, volume=volume, loop=do_loop)
+                track.resume(do_fade)
                 self.tracks[track_id] = track
 
-    def pause(self, track_id):
+    def pause(self, track_id, do_fade):
         with self.lock:
             track = self.tracks.get(track_id)
             if track:
-                track.pause()
+                track.pause(do_fade)
 
-    def resume(self, track_id):
+    def resume(self, track_id, do_fade):
         with self.lock:
             track = self.tracks.get(track_id)
             if track:
-                track.resume()
+                track.resume(do_fade)
 
     def stop(self, track_id):
         with self.lock:

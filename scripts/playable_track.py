@@ -62,7 +62,7 @@ class PlayableTrack(ctk.CTkFrame):
             fg_color="#24525B",
             hover_color="#327380",
             command=self.toggle_play,
-            anchor="center"  # Center the text
+            anchor="center"
         )
         self.play_button.pack(side="left", padx=(0, 10))
         self.play_button.pack_propagate(False)
@@ -122,8 +122,6 @@ class PlayableTrack(ctk.CTkFrame):
         self.time_label.bind("<Enter>", self.on_hover)
         self.time_label.bind("<Leave>", self.on_leave)
 
-        # self.update_duration_label()
-
     def toggle_play(self):
         if not self.is_playing or self.is_paused:
             self.play()
@@ -132,8 +130,13 @@ class PlayableTrack(ctk.CTkFrame):
             self.pause()
 
     def play(self):
-        self.player.play(self.track.id, self.track.file_path,
-                         (self.panel.panel_volume / 100) * self.soundboard.volume)
+        self.player.play(
+            self.track.id,
+            self.track.file_path,
+            (self.panel.panel_volume / 100) * self.soundboard.volume,
+            self.panel.do_loop,
+            self.panel.do_fade
+        )
         self.is_playing = True
         self.is_paused = False
         self.play_button.configure(text="⏸")
@@ -143,7 +146,7 @@ class PlayableTrack(ctk.CTkFrame):
         if not self.is_playing:
             return
 
-        self.player.pause(self.track.id)
+        self.player.pause(self.track.id, self.panel.do_fade)
         self.is_playing = False
         self.is_paused = True
         self.play_button.configure(text="▶")

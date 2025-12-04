@@ -109,3 +109,17 @@ def set_panel_volume(panel_id: int, volume: float):
 def get_panel_volume(panel_id: int):
     volume = execute_query('SELECT volume FROM panels WHERE id=?', (panel_id,), fetch=True)
     return volume[0][0]
+
+def set_panel_loop(panel_id, value):
+    do_loop = execute_query('UPDATE panels SET loop_enabled=? WHERE id=?', (value, panel_id))
+
+def get_panel_loop(panel_id):
+    do_loop = execute_query('SELECT loop_enabled FROM panels WHERE id=?', (panel_id,), fetch=True)
+    return do_loop[0][0]
+
+def set_panel_fade(panel_id, value):
+    execute_query('UPDATE panels SET fade_enabled=? WHERE id=?', (value, panel_id))
+
+def get_panel_fade(panel_id):
+    do_fade = execute_query('SELECT fade_enabled FROM panels WHERE id=?', (panel_id,), fetch=True)
+    return do_fade[0][0]

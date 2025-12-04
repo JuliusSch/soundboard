@@ -1,7 +1,8 @@
 import customtkinter as ctk
 
 from scripts.database import get_selected_tracks, add_selected_track, \
-    get_selected_track, set_panel_volume, get_panel_volume
+    get_selected_track, set_panel_volume, get_panel_volume, set_panel_fade, set_panel_loop, get_panel_loop, \
+    get_panel_fade
 from scripts.playable_track import PlayableTrack
 
 class TrackPanel(ctk.CTkFrame):
@@ -13,6 +14,8 @@ class TrackPanel(ctk.CTkFrame):
         self.soundboard = soundboard
         self.panel_volume = get_panel_volume(self.panel_id) or 50
         self.currently_playing = None
+        self.do_fade = False
+        self.do_loop = False
 
         self.track_comps = []
 
@@ -23,14 +26,45 @@ class TrackPanel(ctk.CTkFrame):
         self.label = ctk.CTkLabel(self.header, text=title, font=("Arial", 14, "bold"))
         self.label.pack(padx=10, side="left")
 
+        # Header buttons
+        self.toggle_fade_button = ctk.CTkButton(
+            self.header,
+            text="🔀",
+            font=("Segoe UI Emoji", 12, "bold"),
+            command=self.toggle_fade,
+            corner_radius=6,
+            fg_color="#2a2a2a",
+            hover_color="#327380",
+            width=24,
+            height=24,
+        )
+        self.toggle_fade_button.pack(padx=5, side="left")
+
+        self.toggle_loop_button = ctk.CTkButton(
+            self.header,
+            text="🔄",
+            font=("Segoe UI Emoji", 12, "bold"),
+            command=self.toggle_loop,
+            corner_radius=6,
+            fg_color="#2a2a2a",
+            hover_color="#327380",
+            width=24,
+            height=24,
+        )
+        self.toggle_loop_button.pack(padx=5, side="left")
+
         # Volume slider
-        self.volume_slider = ctk.CTkSlider(self.header, from_=0, to=100, command=self.on_volume_change)
+        self.volume_slider = ctk.CTkSlider(self.header, from_=0, to=100,
+                                           command=self.on_volume_change)
         self.volume_slider.set(self.panel_volume)
         self.volume_slider.pack(padx=5, pady=5, fill="x")
 
         # Track list area
         self.tracks_frame = ctk.CTkFrame(self)
         self.tracks_frame.pack(fill="both", expand=True, padx=5, pady=(0, 5))
+
+        self.set_fade(get_panel_fade(self.panel_id) or False)
+        self.set_loop(get_panel_loop(self.panel_id) or False)
 
     def load_selected_tracks(self):
         for widget in self.tracks_frame.winfo_children():
@@ -67,11 +101,27 @@ class TrackPanel(ctk.CTkFrame):
                 comp.pause()
         self.currently_playing = started_component
 
-    def toggle_looping(self):
-        self.loop_enabled = not getattr(self, "loop_enabled", False)
-
     def toggle_fade(self):
-        self.fade_enabled = not getattr(self, "fade_enabled", False)
+        self.set_fade(not self.do_fade)
+
+    def set_fade(self, do_fade):
+        self.do_fade = do_fade
+        set_panel_fade(self.panel_id, self.do_fade)
+        if self.do_fade:
+            self.toggle_fade_button.configure(fg_color="#327380")
+        else:
+            self.toggle_fade_button.configure(fg_color="#2a2a2a")
+
+    def toggle_loop(self):
+        self.set_loop(self.do_loop)
+
+    def set_loop(self, do_loop):
+        self.do_loop = do_loop
+        set_panel_loop(self.panel_id, self.do_loop)
+        if self.do_loop:
+            self.toggle_loop_button.configure(fg_color="#327380")
+        else:
+            self.toggle_loop_button.configure(fg_color="#2a2a2a")
 
     def on_volume_change(self, value):
         self.panel_volume = float(value)
